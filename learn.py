@@ -26,12 +26,13 @@ args = parser.parse_args()
 # lr = 1e-4
 lr = 1e-2
 # lr = 1e-4
-img_size = 32
+img_size = 64
 batch_size = 64
 # n_items = 100000
 n_items = sys.maxsize
-epochs = sys.maxsize
-noise_dim = 64
+# epochs = sys.maxsize
+epochs = 200
+noise_dim = 128
 num_examples_to_generate = 16
 regularization_multiplier = 0.1
 reset_probability = 0.5
@@ -45,7 +46,7 @@ def process_img(file_path, img_size):
   img = tf.image.convert_image_dtype(img, tf.float32)
   img = tf.image.resize(img, size=(img_size, img_size), method='area')
   img = tf.image.convert_image_dtype(img, tf.uint8)
-  return img.numpy()
+  return img
 
 def make_generator_model():
   gen = tf.keras.Sequential(
@@ -61,6 +62,9 @@ def make_generator_model():
       layers.Conv2DTranspose(64, kernel_size=4, strides=2, padding='same', use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
+      layers.Conv2DTranspose(32, kernel_size=4, strides=2, padding='same', use_bias=False),
+      layers.BatchNormalization(),
+      layers.LeakyReLU(alpha=0.2),
       layers.Conv2DTranspose(3, kernel_size=4, strides=2, activation='sigmoid', padding='same')
     ],
     name="generator",
@@ -70,8 +74,10 @@ def make_generator_model():
     [
       layers.Input(shape=(noise_dim,)),
       layers.Dense(512),
+      layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
+      layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
@@ -84,7 +90,10 @@ def make_discriminator_model():
   disc = tf.keras.Sequential(
     [
       layers.Input(shape=(img_size, img_size, 3)),
-      layers.Conv2D(64, (4, 4), padding='same', strides=2),
+      layers.Conv2D(32, (4, 4), padding='same', strides=2),
+      layers.LeakyReLU(alpha=0.2),
+      layers.Conv2D(64, (4, 4), padding='same', strides=2, use_bias=False),
+      layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
       layers.Conv2D(128, (4, 4), padding='same', strides=2, use_bias=False),
       layers.BatchNormalization(),
@@ -104,8 +113,10 @@ def make_discriminator_model():
     [
       layers.Input(shape=(noise_dim*2,)),
       layers.Dense(512),
+      layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
+      layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
@@ -116,6 +127,7 @@ def make_discriminator_model():
     [
       layers.Input(shape=(noise_dim,)),
       layers.Dense(512),
+      layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(1, activation=None)
     ],
@@ -123,20 +135,6 @@ def make_discriminator_model():
   )
 
   return disc, recurrent_disc, end_disc
-
-x_files = sorted(glob(f'{args.data_dir}/*.jpg'))[:n_items]
-cache_file_name = f'{args.data_dir}.pickle'
-if os.path.isfile(cache_file_name):
-  with open(cache_file_name, 'rb') as f:
-    all_images = pickle.load(f)
-else:
-  all_images = []
-  for item in tqdm(x_files):
-    all_images.append(process_img(item, img_size))
-  with open(cache_file_name, 'wb') as f:
-    pickle.dump(all_images, f)
-
-batches_per_epoch = int((len(x_files)-every_nth*seq_len)/(batch_size*seq_len))
 
 def data_generator():
   while True:
@@ -153,15 +151,7 @@ class CustomModel(tf.keras.Model):
   def __init__(self):
     super(CustomModel, self).__init__()
 
-    # You will reuse this seed overtime (so it's easier)
-    # to visualize progress in the animated GIF)
-    # self.gen_optimizer = tf.keras.optimizers.Adam(lr, beta_1=0.5)
-    # self.disc_optimizer = tf.keras.optimizers.Adam(lr, beta_1=0.5)
-    self.gen_optimizer = tf.keras.optimizers.SGD(lr)
-    self.disc_optimizer = tf.keras.optimizers.SGD(lr)
-
     self.seed = tf.random.normal([num_examples_to_generate, noise_dim])
-    self.val_data = self.transform_images(next(data_generator()))[0]
 
     self.gen_loss_tracker = tf.keras.metrics.Mean(name="gen_loss")
     self.disc_loss_tracker = tf.keras.metrics.Mean(name="disc_loss")
@@ -173,7 +163,6 @@ class CustomModel(tf.keras.Model):
 
     self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
     self.noise = tf.Variable(tf.random.normal([batch_size, noise_dim]))
-    # self.noise = tf.random.normal([batch_size, noise_dim])
 
     self.generator, self.recurrent_generator = make_generator_model()
     self.generator.summary()
@@ -198,16 +187,14 @@ class CustomModel(tf.keras.Model):
   def call(self, _, training=False):
     return self.inference()
 
-  def generate(self, noise=None):
-    if noise is None:
-      noise = tf.random.normal([1, noise_dim])
-    img = self.generator(noise)
-    new_noise = self.recurrent_generator(noise)
+  def generate(self, noise):
+    img = self.generator(noise, training=False)
+    new_noise = self.recurrent_generator(noise, training=False)
     return img, new_noise
 
   @tf.function
   def transform_images(self, images):
-    out_images = tf.stack([tf.stack([tf.image.convert_image_dtype(tf.convert_to_tensor(item, dtype=tf.uint8), tf.float32) for item in sublist]) for sublist in images])
+    out_images = tf.stack([tf.stack([tf.image.convert_image_dtype(item, tf.float32) for item in sublist]) for sublist in images])
     return out_images
 
   @tf.function
@@ -328,12 +315,23 @@ class CustomCallback(tf.keras.callbacks.Callback):
 
   def on_epoch_begin(self, epoch, logs):
     if epoch == 0:
+      self.model.lr_decayed_fn = tf.keras.optimizers.schedules.CosineDecay(lr, epochs*batches_per_epoch)
+
+      self.model.gen_optimizer = tf.keras.optimizers.SGD(self.model.lr_decayed_fn)
+      self.model.disc_optimizer = tf.keras.optimizers.SGD(self.model.lr_decayed_fn)
+
+      self.model.val_data = self.model.transform_images(next(data_generator()))[0]
+
       with file_writer.as_default():
         tf.summary.image("In imgs first", self.model.val_data[0,...], step=epoch, max_outputs=num_examples_to_generate)
         tf.summary.image("In imgs second", self.model.val_data[1,...], step=epoch, max_outputs=num_examples_to_generate)
         tf.summary.image("In imgs third", self.model.val_data[2,...], step=epoch, max_outputs=num_examples_to_generate)
         tf.summary.image("In imgs middle", self.model.val_data[int(self.model.val_data.shape[0]/2),...], step=epoch, max_outputs=num_examples_to_generate)
         tf.summary.image("In imgs end", self.model.val_data[-1,...], step=epoch, max_outputs=num_examples_to_generate)
+        
+    with file_writer.as_default():
+      tf.summary.scalar('lr', self.model.lr_decayed_fn(epoch*batches_per_epoch), step=epoch)
+    
     self.model.gen_loss_tracker.reset_states()
     self.model.disc_loss_tracker.reset_states()
     self.model.gen_regularization_loss_tracker.reset_states()
@@ -379,10 +377,25 @@ class CustomCallback(tf.keras.callbacks.Callback):
 model = CustomModel()
 model.compile()#, run_eagerly=True)
 if args.weights != '':
+  
   print("Loading weights from", args.weights)
   model.load_weights(args.weights)
 
 if args.mode == 'train':
+  x_files = sorted(glob(f'{args.data_dir}/*.jpg'))[:n_items]
+  cache_file_name = f'{args.data_dir}.pickle'
+  if os.path.isfile(cache_file_name):
+    with open(cache_file_name, 'rb') as f:
+      all_images = pickle.load(f)
+  else:
+    all_images = []
+    for item in tqdm(x_files):
+      all_images.append(process_img(item, img_size))
+    with open(cache_file_name, 'wb') as f:
+      pickle.dump(all_images, f)
+
+  batches_per_epoch = int((len(x_files)-every_nth*seq_len)/(batch_size*seq_len))
+
   logdir = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
   file_writer = tf.summary.create_file_writer(logdir)
   model.fit(x=data_generator(),
@@ -396,18 +409,18 @@ if args.mode == 'train':
             steps_per_epoch=batches_per_epoch)
             # steps_per_epoch=1)
 elif args.mode == 'live':
-  noise = None
+  noise = tf.random.normal([batch_size, noise_dim])
   for i in count(0):
     start_time = time.time()
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
     gen_std = tf.math.reduce_std(noise)
     noise = (noise - gen_mean)/gen_std
-    frame = tf.image.convert_image_dtype(frame, tf.uint8)
+    frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = cv2.resize(frame,(4*frame.shape[0], 4*frame.shape[1]))
-    print('frame number', i)
+    print('frame number', i, end='\r')
     cv2.imshow('Output', frame)
     # Press Q on keyboard to  exit
     if cv2.waitKey(25) & 0xFF == ord('q'):
