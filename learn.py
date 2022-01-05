@@ -189,8 +189,8 @@ class CustomModel(tf.keras.Model):
     return self.inference()
 
   def generate(self, noise):
-    img = self.generator(noise, training=False)
-    new_noise = self.recurrent_generator(noise[0:1,...], training=False)
+    img = self.generator(noise[0:1,...], training=False)
+    new_noise = self.recurrent_generator(noise, training=False)
     return img, new_noise
 
   @tf.function
