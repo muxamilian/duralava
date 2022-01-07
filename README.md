@@ -2,7 +2,8 @@
 Duralava is a neural network which can learn to simulate a lava lamp in an infinite loop. 
 
 ## Example
-![out](https://user-images.githubusercontent.com/1943719/148611813-b7da9a29-1b09-413a-965d-c6b65e79a058.png)
+
+![out](https://user-images.githubusercontent.com/1943719/148613707-26cefa69-9340-426b-ba67-cd120ae4abe7.png)
 
 ## How it works
 
