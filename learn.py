@@ -33,6 +33,8 @@ n_items = sys.maxsize
 # epochs = sys.maxsize
 epochs = 200
 noise_dim = 64
+disc_dim = 128
+disc_recurrent_dim = 128
 num_examples_to_generate = 16
 regularization_multiplier = 0.1
 reset_probability = 0.5
@@ -101,7 +103,7 @@ def make_discriminator_model():
       layers.Conv2D(256, (4, 4), padding='same', strides=2, use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2D(noise_dim*2, (4, 4), padding='same', strides=4),
+      layers.Conv2D(disc_dim, (4, 4), padding='same', strides=4),
       # layers.LeakyReLU(alpha=0.2),
       layers.Flatten(),
       # layers.Dense(1, activation=None),
@@ -111,14 +113,14 @@ def make_discriminator_model():
 
   recurrent_disc = tf.keras.Sequential(
     [
-      layers.Input(shape=(noise_dim*4,)),
+      layers.Input(shape=(disc_dim+disc_recurrent_dim,)),
       layers.Dense(512),
       # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
       # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(noise_dim*2),
+      layers.Dense(disc_recurrent_dim),
       # layers.LeakyReLU(alpha=0.2)
     ],
     name="discriminator_recurrent"
@@ -126,7 +128,7 @@ def make_discriminator_model():
 
   end_disc = tf.keras.Sequential(
     [
-      layers.Input(shape=(noise_dim*2,)),
+      layers.Input(shape=(disc_recurrent_dim,)),
       layers.Dense(512),
       # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
@@ -222,8 +224,8 @@ class CustomModel(tf.keras.Model):
     # current_noise = tf.random.normal([batch_size, noise_dim])
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-      prev_real_output  = tf.zeros((batch_size, noise_dim*2))
-      prev_fake_output = tf.zeros((batch_size, noise_dim*2))
+      prev_real_output  = tf.zeros((batch_size, noise_dim*disc_multiplier))
+      prev_fake_output = tf.zeros((batch_size, noise_dim*disc_multiplier))
       gen_losses = []
       gen_regularization_losses = []
       gen_means = []
@@ -251,13 +253,13 @@ class CustomModel(tf.keras.Model):
         gen_regularization_losses.append(gen_regularization_loss)
         current_noise = (current_noise - gen_mean)/gen_std
 
-        real_first_output = tf.reshape(self.discriminator(images[i,...], training=True), (batch_size, noise_dim*2))
+        real_first_output = tf.reshape(self.discriminator(images[i,...], training=True), (batch_size, noise_dim*disc_multiplier))
         concat_real = tf.concat((real_first_output, prev_real_output), axis=-1)
         prev_real_output = self.recurrent_discriminator(concat_real, training=True)
         real_output = self.end_discriminator(prev_real_output, training=True)
         # real_output = self.discriminator(images[i,...], training=True)
 
-        fake_first_output = tf.reshape(self.discriminator(generated_images, training=True), (batch_size, noise_dim*2))
+        fake_first_output = tf.reshape(self.discriminator(generated_images, training=True), (batch_size, noise_dim*disc_multiplier))
         concat_fake = tf.concat((fake_first_output, prev_fake_output), axis=-1)
         prev_fake_output = self.recurrent_discriminator(concat_fake, training=True)
         fake_output = self.end_discriminator(prev_fake_output, training=True)
@@ -284,6 +286,7 @@ class CustomModel(tf.keras.Model):
 
       self.gen_optimizer.apply_gradients(zip(gradients_of_generator, self.generator.trainable_variables + 
         self.recurrent_generator.trainable_variables))
+
       self.disc_optimizer.apply_gradients(zip(gradients_of_discriminator, self.discriminator.trainable_variables + 
         self.recurrent_discriminator.trainable_variables + 
         self.end_discriminator.trainable_variables))
@@ -318,8 +321,6 @@ class CustomCallback(tf.keras.callbacks.Callback):
 
       self.model.gen_optimizer = tf.keras.optimizers.SGD(self.model.lr_decayed_fn)
       self.model.disc_optimizer = tf.keras.optimizers.SGD(self.model.lr_decayed_fn)
-      # self.model.gen_optimizer = tf.keras.optimizers.Adam(self.model.lr_decayed_fn, beta_1=0.5)
-      # self.model.disc_optimizer = tf.keras.optimizers.Adam(self.model.lr_decayed_fn, beta_1=0.5)
 
       self.model.val_data = self.model.transform_images(next(data_generator()))[0]
 
@@ -421,7 +422,7 @@ elif args.mode == 'live':
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = cv2.resize(frame,(4*frame.shape[0], 4*frame.shape[1]))
+    frame = cv2.resize(frame,(2*frame.shape[0], 2*frame.shape[1]))
     print('frame number', i, end='\r')
     cv2.imshow('Output', frame)
     # Press Q on keyboard to  exit
