@@ -12,6 +12,8 @@ import time
 import cv2
 from itertools import count
 import numpy as np
+from PIL import Image
+import subprocess
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
 parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
@@ -423,11 +425,11 @@ elif args.mode == 'live':
   num_of_frames = int(fps/actual_fps)
   frame = None
   last_frame = None
-  fourcc = cv2.VideoWriter_fourcc(*'png ')
-  out = cv2.VideoWriter('output.avi', fourcc, 30.0, (img_size,img_size))
-  start_time = time.time()
-  # for i in count(0):
-  for i in range(int(60*actual_fps)):
+  # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
+  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
+  # start_time = time.time()
+  for i in count(0):
+  # for i in range(int(120*actual_fps)):
     last_frame = frame
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
@@ -435,8 +437,8 @@ elif args.mode == 'live':
     noise = (noise - gen_mean)/gen_std
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = cv2.resize(frame,(frame.shape[0], frame.shape[1]))
+    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # frame = cv2.resize(frame,(frame.shape[0]*2, frame.shape[1]*2))
     if i > 0:
       frame_float = frame.astype(np.float32)
       last_frame_float = last_frame.astype(np.float32)
@@ -444,11 +446,16 @@ elif args.mode == 'live':
         interpolated_frame = (last_frame_float * ((num_of_frames-j)/num_of_frames) + frame_float * (j/num_of_frames)).astype(np.uint8)
         # print('interpolated_frame', interpolated_frame)
         print('real frame', i, 'interpol. frame', i*num_of_frames+j, end='\r')
-        cv2.imshow('Output', interpolated_frame)
-        out.write(interpolated_frame)
+        # cv2.imshow('Output', interpolated_frame)
+        im = Image.fromarray(frame)
+        im.save(p.stdin, 'PNG')
         # Press Q on keyboard to  exit
-        if cv2.waitKey(25) & 0xFF == ord('q'):
-          break
+        # if cv2.waitKey(25) & 0xFF == ord('q'):
+        #   break
         # time.sleep(max(1/fps*every_nth - (time.time()-start_time), 0))
-        time.sleep(max(1/fps - (time.time()-start_time), 0))
-        start_time = time.time()
+        # time.sleep(max(1/fps - (time.time()-start_time), 0))
+        # start_time = time.time()
+
+  p.stdin.close()
+  p.wait()
+
