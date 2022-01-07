@@ -6,17 +6,22 @@ from tensorflow.keras import layers
 from datetime import datetime
 import argparse
 import random
-from tensorflow.python.ops.gen_batch_ops import batch
 from tqdm import tqdm
 import pickle
 import time
 import cv2
 from itertools import count
+import numpy as np
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
 parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
 parser.add_argument('--weights', type=str, default='', help='Directory with training data.')
 parser.add_argument('--mode', type=str, default='train', help='What to do.')
+
+# parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
+# parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
+# parser.add_argument('--weights', type=str, default='/Users/max/src/duralava/logs/20220104-213105/weights.180', help='Directory with training data.')
+# parser.add_argument('--mode', type=str, default='live', help='What to do.')
 
 args = parser.parse_args()
 
@@ -224,8 +229,8 @@ class CustomModel(tf.keras.Model):
     # current_noise = tf.random.normal([batch_size, noise_dim])
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-      prev_real_output  = tf.zeros((batch_size, noise_dim*disc_multiplier))
-      prev_fake_output = tf.zeros((batch_size, noise_dim*disc_multiplier))
+      prev_real_output  = tf.zeros((batch_size, disc_recurrent_dim))
+      prev_fake_output = tf.zeros((batch_size, disc_recurrent_dim))
       gen_losses = []
       gen_regularization_losses = []
       gen_means = []
@@ -253,13 +258,13 @@ class CustomModel(tf.keras.Model):
         gen_regularization_losses.append(gen_regularization_loss)
         current_noise = (current_noise - gen_mean)/gen_std
 
-        real_first_output = tf.reshape(self.discriminator(images[i,...], training=True), (batch_size, noise_dim*disc_multiplier))
+        real_first_output = tf.reshape(self.discriminator(images[i,...], training=True), (batch_size, disc_dim))
         concat_real = tf.concat((real_first_output, prev_real_output), axis=-1)
         prev_real_output = self.recurrent_discriminator(concat_real, training=True)
         real_output = self.end_discriminator(prev_real_output, training=True)
         # real_output = self.discriminator(images[i,...], training=True)
 
-        fake_first_output = tf.reshape(self.discriminator(generated_images, training=True), (batch_size, noise_dim*disc_multiplier))
+        fake_first_output = tf.reshape(self.discriminator(generated_images, training=True), (batch_size, disc_dim))
         concat_fake = tf.concat((fake_first_output, prev_fake_output), axis=-1)
         prev_fake_output = self.recurrent_discriminator(concat_fake, training=True)
         fake_output = self.end_discriminator(prev_fake_output, training=True)
@@ -411,10 +416,19 @@ if args.mode == 'train':
             shuffle=False,
             steps_per_epoch=batches_per_epoch)
             # steps_per_epoch=1)
+
 elif args.mode == 'live':
   noise = tf.random.normal([batch_size, noise_dim])
-  for i in count(0):
-    start_time = time.time()
+  actual_fps = fps / every_nth
+  num_of_frames = int(fps/actual_fps)
+  frame = None
+  last_frame = None
+  fourcc = cv2.VideoWriter_fourcc(*'png ')
+  out = cv2.VideoWriter('output.avi', fourcc, 30.0, (img_size,img_size))
+  start_time = time.time()
+  # for i in count(0):
+  for i in range(int(60*actual_fps)):
+    last_frame = frame
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
     gen_std = tf.math.reduce_std(noise)
@@ -422,12 +436,19 @@ elif args.mode == 'live':
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = cv2.resize(frame,(2*frame.shape[0], 2*frame.shape[1]))
-    print('frame number', i, end='\r')
-    cv2.imshow('Output', frame)
-    # Press Q on keyboard to  exit
-    if cv2.waitKey(25) & 0xFF == ord('q'):
-      break
-    time.sleep(max(1/fps*every_nth - (time.time()-start_time), 0))
-    # time.sleep((time.time()-start_time)/fps*every_nth)
-
+    frame = cv2.resize(frame,(frame.shape[0], frame.shape[1]))
+    if i > 0:
+      frame_float = frame.astype(np.float32)
+      last_frame_float = last_frame.astype(np.float32)
+      for j in range(num_of_frames):
+        interpolated_frame = (last_frame_float * ((num_of_frames-j)/num_of_frames) + frame_float * (j/num_of_frames)).astype(np.uint8)
+        # print('interpolated_frame', interpolated_frame)
+        print('real frame', i, 'interpol. frame', i*num_of_frames+j, end='\r')
+        cv2.imshow('Output', interpolated_frame)
+        out.write(interpolated_frame)
+        # Press Q on keyboard to  exit
+        if cv2.waitKey(25) & 0xFF == ord('q'):
+          break
+        # time.sleep(max(1/fps*every_nth - (time.time()-start_time), 0))
+        time.sleep(max(1/fps - (time.time()-start_time), 0))
+        start_time = time.time()
