@@ -28,6 +28,6 @@ The tricky part is to make sure that the state of the lava lamp (the 64 element 
 I trained on a MacBook Air with an M1 SoC with 16 GB of shared memory for CPU and GPU. Thus, memory was the limiting factor in my experiments. 
 
 With more memory, one could 
-* Increase the resolution (currently 64)
+* Increase the resolution (currently 64x64 pixels)
 * Increase the training sequence length (currently 20)
 * Increase the batch size (currently 32)
