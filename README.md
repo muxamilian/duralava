@@ -33,3 +33,4 @@ With more memory, one could
 * Increase the resolution (currently 64x64 pixels)
 * Increase the training sequence length (currently 20)
 * Increase the batch size (currently 32)
+* Increase the size of the recurrent neural networks, which model the evolution of the lava lamp over time
