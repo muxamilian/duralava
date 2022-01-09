@@ -426,10 +426,10 @@ elif args.mode == 'live':
   frame = None
   last_frame = None
   # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
-  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
+  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
   # start_time = time.time()
-  for i in count(0):
-  # for i in range(int(120*actual_fps)):
+  # for i in count(0):
+  for i in range(int(30*actual_fps)):
     last_frame = frame
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
@@ -447,7 +447,7 @@ elif args.mode == 'live':
         # print('interpolated_frame', interpolated_frame)
         print('real frame', i, 'interpol. frame', i*num_of_frames+j, end='\r')
         # cv2.imshow('Output', interpolated_frame)
-        im = Image.fromarray(frame)
+        im = Image.fromarray(interpolated_frame)
         im.save(p.stdin, 'PNG')
         # Press Q on keyboard to  exit
         # if cv2.waitKey(25) & 0xFF == ord('q'):
