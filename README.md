@@ -34,3 +34,7 @@ With more memory, one could
 * Increase the training sequence length (currently 20)
 * Increase the batch size (currently 32)
 * Increase the size of the recurrent neural networks, which model the evolution of the lava lamp over time
+
+## Dataset
+
+```square.mov``` contains more than 1 hour of footage of a lava lamp at 30 fps and can be freely used for any purpose. In the ```frames``` directory are the individual frames of the video scaled to 64x64 pixels, which I used for training the model. 
