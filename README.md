@@ -31,7 +31,7 @@ To learn a new model run
 
     python learn.py
     
-Around 10 GB of combined CPU and GPU memory are required. 
+Around 10 GB of combined CPU and GPU memory are required. I used python 3.9.7 and the pip requirements listed in ```requirements.txt```. 
 
 ## Generating an output video
 
