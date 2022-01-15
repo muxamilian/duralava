@@ -25,6 +25,22 @@ For a lava lamp, a sequence of images has to be created. This sequence should in
 
 The tricky part is to make sure that the state of the lava lamp (the 64 element random noise vector) remains stable. It could for example happen that over time the distribution of noise in the vector diverges from a normal distribution and that the mean becomes 10 and the standard deviation 52. In this case, the output images of the lava lamps wouldn't be correct anymore as the GAN was trained to expect the input vector to be normally distributed. To solve this problem, I make sure that in training the output of the RNN stays normally distributed. This is accomplished by adding penalization terms in the training which discourage the noise to diverge from the normal distribution. 
 
+## Learning 
+
+To learn a new model run
+
+    python learn.py
+    
+Around 10 GB of combined CPU and GPU memory are required. 
+
+## Generating an output video
+
+To generate an output video use some of the trained weights like this: 
+
+    python learn.py --weights logs/20220104-213105/weights.180 --mode live
+    
+An APNG named ```out.png``` will be created in the current directory. 
+
 ## Low-hanging fruit
 
 I trained on a MacBook Air with an M1 SoC with 16 GB of shared memory for CPU and GPU. Thus, memory was the limiting factor in my experiments. 
