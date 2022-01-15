@@ -8,9 +8,6 @@ import argparse
 import random
 from tqdm import tqdm
 import pickle
-import time
-import cv2
-from itertools import count
 import numpy as np
 from PIL import Image
 import subprocess
@@ -20,24 +17,13 @@ parser.add_argument('--data_dir', type=str, default='frames', help='Directory wi
 parser.add_argument('--weights', type=str, default='', help='Directory with training data.')
 parser.add_argument('--mode', type=str, default='train', help='What to do.')
 
-# parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
-# parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
-# parser.add_argument('--weights', type=str, default='/Users/max/src/duralava/logs/20220104-213105/weights.180', help='Directory with training data.')
-# parser.add_argument('--mode', type=str, default='live', help='What to do.')
-
 args = parser.parse_args()
 
-# Disable GPU
-# tf.config.experimental.set_visible_devices([], 'GPU')
 
-# lr = 1e-4
 lr = 1e-3
-# lr = 1e-4
 img_size = 64
 batch_size = 32
-# n_items = 100000
 n_items = sys.maxsize
-# epochs = sys.maxsize
 epochs = 200
 noise_dim = 64
 disc_dim = 128
@@ -48,6 +34,7 @@ reset_probability = 0.5
 every_nth = 6
 seq_len = 20
 fps = 30
+evaluation_duration = 30
 
 def process_img(file_path, img_size):
   img = tf.io.read_file(file_path)
@@ -83,10 +70,8 @@ def make_generator_model():
     [
       layers.Input(shape=(noise_dim,)),
       layers.Dense(512),
-      # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
-      # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
@@ -111,9 +96,7 @@ def make_discriminator_model():
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
       layers.Conv2D(disc_dim, (4, 4), padding='same', strides=4),
-      # layers.LeakyReLU(alpha=0.2),
       layers.Flatten(),
-      # layers.Dense(1, activation=None),
     ],
     name="discriminator",
   )
@@ -122,13 +105,10 @@ def make_discriminator_model():
     [
       layers.Input(shape=(disc_dim+disc_recurrent_dim,)),
       layers.Dense(512),
-      # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
-      # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(disc_recurrent_dim),
-      # layers.LeakyReLU(alpha=0.2)
     ],
     name="discriminator_recurrent"
   )
@@ -137,7 +117,6 @@ def make_discriminator_model():
     [
       layers.Input(shape=(disc_recurrent_dim,)),
       layers.Dense(512),
-      # layers.Dropout(0.1),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(1, activation=None)
     ],
@@ -226,9 +205,7 @@ class CustomModel(tf.keras.Model):
   @tf.function
   def train_step(self, images):
     images = self.transform_images(images[0])
-    # self.noise = tf.random.normal([batch_size, noise_dim])
     current_noise = self.noise
-    # current_noise = tf.random.normal([batch_size, noise_dim])
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
       prev_real_output  = tf.zeros((batch_size, disc_recurrent_dim))
@@ -264,18 +241,14 @@ class CustomModel(tf.keras.Model):
         concat_real = tf.concat((real_first_output, prev_real_output), axis=-1)
         prev_real_output = self.recurrent_discriminator(concat_real, training=True)
         real_output = self.end_discriminator(prev_real_output, training=True)
-        # real_output = self.discriminator(images[i,...], training=True)
 
         fake_first_output = tf.reshape(self.discriminator(generated_images, training=True), (batch_size, disc_dim))
         concat_fake = tf.concat((fake_first_output, prev_fake_output), axis=-1)
         prev_fake_output = self.recurrent_discriminator(concat_fake, training=True)
         fake_output = self.end_discriminator(prev_fake_output, training=True)
-        # fake_output = self.discriminator(generated_images, training=True)
 
         gen_losses.append(self.generator_loss(fake_output))
         disc_losses.append(self.discriminator_loss(real_output, fake_output))
-        # gen_loss = self.generator_loss(fake_output)
-        # disc_loss = self.discriminator_loss(real_output, fake_output)
 
       gen_loss = tf.reduce_mean(tf.stack(gen_losses))
       gen_regularization_loss = tf.reduce_mean(tf.stack(gen_regularization_losses))
@@ -283,7 +256,6 @@ class CustomModel(tf.keras.Model):
       disc_loss = tf.reduce_mean(tf.stack(disc_losses))
 
       gradients_of_generator = gen_tape.gradient(gen_loss + regularization_multiplier*gen_regularization_loss, 
-      # gradients_of_generator = gen_tape.gradient(gen_loss, 
         self.generator.trainable_variables + 
         self.recurrent_generator.trainable_variables)
       gradients_of_discriminator = disc_tape.gradient(disc_loss, 
@@ -306,8 +278,6 @@ class CustomModel(tf.keras.Model):
       self.gen_skew_tracker.update_state(tf.reduce_mean(tf.stack(gen_skew)))
       self.gen_kurt_tracker.update_state(tf.reduce_mean(tf.stack(gen_kurt)))
 
-      # reset_raw = tf.concat((tf.ones((int(reset_probability*batch_size),),dtype=tf.float32), tf.zeros((int((1-reset_probability)*batch_size),),dtype=tf.float32)), axis=0)
-      # reset = tf.reshape(tf.random.shuffle(reset_raw), (-1, 1))
       reset = tf.reshape(tf.cast(tf.random.uniform((batch_size,)) <= reset_probability, tf.float32), (-1, 1))
       new_noise = tf.random.normal([batch_size, noise_dim])
       self.noise.assign((1-reset)*current_noise + reset*new_noise)
@@ -379,7 +349,6 @@ class CustomCallback(tf.keras.callbacks.Callback):
       tf.summary.histogram("Out noise third", tf.reshape(third_noise, (-1,)), step=epoch)
       tf.summary.histogram("Out noise middle", tf.reshape(middle_noise, (-1,)), step=epoch)
       tf.summary.histogram("Out noise end", tf.reshape(end_noise, (-1,)), step=epoch)
-      # tf.summary.histogram("Training noise", tf.reshape(self.model.noise, (-1,)), step=epoch)
 
       for key in logs:
         tf.summary.scalar(key, logs[key], step=epoch)
@@ -417,7 +386,6 @@ if args.mode == 'train':
             ],
             shuffle=False,
             steps_per_epoch=batches_per_epoch)
-            # steps_per_epoch=1)
 
 elif args.mode == 'live':
   noise = tf.random.normal([batch_size, noise_dim])
@@ -425,11 +393,9 @@ elif args.mode == 'live':
   num_of_frames = int(fps/actual_fps)
   frame = None
   last_frame = None
-  # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
-  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
-  # start_time = time.time()
-  # for i in count(0):
-  for i in range(int(30*actual_fps)):
+  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
+  # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
+  for i in range(evaluation_duration*int(actual_fps)):
     last_frame = frame
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
@@ -437,24 +403,14 @@ elif args.mode == 'live':
     noise = (noise - gen_mean)/gen_std
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
-    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # frame = cv2.resize(frame,(frame.shape[0]*2, frame.shape[1]*2))
     if i > 0:
       frame_float = frame.astype(np.float32)
       last_frame_float = last_frame.astype(np.float32)
       for j in range(num_of_frames):
         interpolated_frame = (last_frame_float * ((num_of_frames-j)/num_of_frames) + frame_float * (j/num_of_frames)).astype(np.uint8)
-        # print('interpolated_frame', interpolated_frame)
         print('real frame', i, 'interpol. frame', i*num_of_frames+j, end='\r')
-        # cv2.imshow('Output', interpolated_frame)
         im = Image.fromarray(interpolated_frame)
         im.save(p.stdin, 'PNG')
-        # Press Q on keyboard to  exit
-        # if cv2.waitKey(25) & 0xFF == ord('q'):
-        #   break
-        # time.sleep(max(1/fps*every_nth - (time.time()-start_time), 0))
-        # time.sleep(max(1/fps - (time.time()-start_time), 0))
-        # start_time = time.time()
 
   p.stdin.close()
   p.wait()
