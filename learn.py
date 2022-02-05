@@ -21,20 +21,37 @@ parser.add_argument('--mode', type=str, default='train', help='What to do.')
 
 args = parser.parse_args()
 
+# Initial learning rate
 lr = 1e-3
 img_size = 64
 batch_size = 32
+# How many frames to take from the dataset for training. By default, take all
 n_items = sys.maxsize
 epochs = 200
+# Dimension of the noise vector of the GAN
 noise_dim = 64
+# Dimension of the internal state of the discriminator
 disc_dim = 128
+# Dimension of the internal state of the recurrent part of the discriminator
 disc_recurrent_dim = 128
+# How many examples to generate for visualization during training
 num_examples_to_generate = 16
+# The higher, the more the the training aims to produces a noise vector in the generator, which is shaped like a normal distribution
 regularization_multiplier = 0.1
+# After every training sequence, the internal state of the generator is reset with this probability. 
+# A higher number makes training more stable (state alwaysa reset) but can lead to the generator making worse output, 
+# thus not creating a credible lava lamp
 reset_probability = 0.5
+# FPS of the lava lamp training data
+original_lava_lamp_fps = 30
+# Letting the GAN learn of 30 FPS is too much. Thus only take every 6th frame (actual FPS is 5 then)
 every_nth = 6
+# Sequence length of the recurrent GAN. More is better but also more unstable. Higher seq_len needs more memory. 
 seq_len = 20
-fps = 20
+# Output fps in 'live' or 'video' mode. If original_lava_lamp_fps==30 and every_nth==6 the actual FPS during training was 30/6==5.
+# If output_fps is more than the FPS of during training, missing frames are linearly interpolated. 
+output_fps = 20
+# Length of the output video/apng to generate in seconds
 evaluation_duration = 30
 
 def process_img(file_path, img_size):
@@ -390,16 +407,17 @@ if args.mode == 'train':
 
 elif args.mode == 'live' or args.mode == 'video':
   noise = tf.random.normal([batch_size, noise_dim])
-  actual_fps = fps / every_nth
-  num_of_frames = int(fps/actual_fps)
+  original_fps = int(original_lava_lamp_fps/every_nth)
+  num_of_frames = int(output_fps/original_fps)
+  print('output_fps', output_fps, 'num_of_frames', num_of_frames)
   frame = None
   last_frame = None
   if args.mode == 'video':
-    p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
+    p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {output_fps} -i - -f apng -plays 0 -r {output_fps} out.png'.split(' '), stdin=subprocess.PIPE)
     # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
   elif args.mode == 'live':
     evaluation_duration = 1000000
-  for i in range(evaluation_duration*int(actual_fps)):
+  for i in range(evaluation_duration*original_fps):
     start_time = time.time()
     last_frame = frame
     frame, noise = model.generate(noise)
@@ -421,7 +439,7 @@ elif args.mode == 'live' or args.mode == 'video':
           im.save(p.stdin, 'PNG')
         elif args.mode == 'live':
           interpolated_frame = cv2.cvtColor(interpolated_frame, cv2.COLOR_BGR2RGB)
-          # time.sleep(max((1/fps) - (time.time() - start_time), 0))
+          time.sleep(max((1/output_fps) - (time.time() - start_time), 0))
           cv2.imshow('', interpolated_frame)  
           if cv2.waitKey(1) & 0xFF == ord('q'):  
               break
