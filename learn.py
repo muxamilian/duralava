@@ -33,7 +33,7 @@ regularization_multiplier = 0.1
 reset_probability = 0.5
 every_nth = 6
 seq_len = 20
-fps = 30
+fps = 20
 evaluation_duration = 30
 
 def process_img(file_path, img_size):
