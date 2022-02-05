@@ -19,7 +19,6 @@ parser.add_argument('--mode', type=str, default='train', help='What to do.')
 
 args = parser.parse_args()
 
-
 lr = 1e-3
 img_size = 64
 batch_size = 32
