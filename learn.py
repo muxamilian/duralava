@@ -11,6 +11,8 @@ import pickle
 import numpy as np
 from PIL import Image
 import subprocess
+import cv2
+import time
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
 parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
@@ -386,15 +388,19 @@ if args.mode == 'train':
             shuffle=False,
             steps_per_epoch=batches_per_epoch)
 
-elif args.mode == 'live':
+elif args.mode == 'live' or args.mode == 'video':
   noise = tf.random.normal([batch_size, noise_dim])
   actual_fps = fps / every_nth
   num_of_frames = int(fps/actual_fps)
   frame = None
   last_frame = None
-  p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
-  # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
+  if args.mode == 'video':
+    p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f apng -plays 0 -r {fps} out.png'.split(' '), stdin=subprocess.PIPE)
+    # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
+  elif args.mode == 'live':
+    evaluation_duration = 1000000
   for i in range(evaluation_duration*int(actual_fps)):
+    start_time = time.time()
     last_frame = frame
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
@@ -403,14 +409,25 @@ elif args.mode == 'live':
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
     if i > 0:
+      if start_time is None:
+        start_time = time.time()
       frame_float = frame.astype(np.float32)
       last_frame_float = last_frame.astype(np.float32)
       for j in range(num_of_frames):
         interpolated_frame = (last_frame_float * ((num_of_frames-j)/num_of_frames) + frame_float * (j/num_of_frames)).astype(np.uint8)
         print('real frame', i, 'interpol. frame', i*num_of_frames+j, end='\r')
-        im = Image.fromarray(interpolated_frame)
-        im.save(p.stdin, 'PNG')
+        if args.mode == 'video':
+          im = Image.fromarray(interpolated_frame)
+          im.save(p.stdin, 'PNG')
+        elif args.mode == 'live':
+          interpolated_frame = cv2.cvtColor(interpolated_frame, cv2.COLOR_BGR2RGB)
+          # time.sleep(max((1/fps) - (time.time() - start_time), 0))
+          cv2.imshow('', interpolated_frame)  
+          if cv2.waitKey(1) & 0xFF == ord('q'):  
+              break
+    start_time = None
 
-  p.stdin.close()
-  p.wait()
+  if args.mode == 'video':
+    p.stdin.close()
+    p.wait()
 
