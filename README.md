@@ -34,11 +34,17 @@ To learn a new model run
     
 Around 10 GB of combined CPU and GPU memory are required. I used python 3.9.7 and the pip requirements listed in ```requirements.txt```. For creating APNGs from a trained neural network, you need to have ```ffmpeg``` installed.  
 
-## Generating an output video
+## Live mode
 
 To generate an output video use some of the trained weights like this: 
 
     python learn.py --weights logs/20220104-213105/weights.180 --mode live
+    
+## Generating an output video
+
+To generate an output video use some of the trained weights like this: 
+
+    python learn.py --weights logs/20220104-213105/weights.180 --mode video
     
 An APNG named ```out.png``` will be created in the current directory. 
 
