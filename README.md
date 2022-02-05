@@ -54,4 +54,4 @@ With more memory, one could
 
 ## Dataset
 
-```square.mov``` contains more than 1 hour of footage of a lava lamp at 30 fps and can be freely used for any purpose. In the ```frames``` directory there are the individual frames of the video scaled to 64x64 pixels, which I used for training the model. 
+```lavalamp.mov``` contains more than 1 hour of footage of a lava lamp at 30 fps and can be freely used for any purpose. In the ```frames``` directory there are the individual frames of the video scaled to 64x64 pixels, which I used for training the model. 
