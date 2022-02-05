@@ -16,8 +16,8 @@ import time
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
 parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
-parser.add_argument('--weights', type=str, default='', help='Directory with training data.')
-parser.add_argument('--mode', type=str, default='train', help='What to do.')
+parser.add_argument('--weights', type=str, default='', help='Path to weights, for example "logs/20220104-213105/weights.160".')
+parser.add_argument('--mode', type=str, default='train', help='Can be "train", "live" or "video".')
 
 args = parser.parse_args()
 
