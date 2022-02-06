@@ -1,5 +1,5 @@
 # duralava
-*duralava* is a neural network which can simulate a lava lamp in an infinite loop. 
+*duralava* is a neural network which can simulate a lava lamp in an infinite loop. [Discussion on Hacker News](https://news.ycombinator.com/item?id=30222243)
 
 ## Example videos
 
