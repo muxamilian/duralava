@@ -21,11 +21,11 @@ Generative Adversarial Networks (GANs) can learn to generate new samples of data
 
 For training, the GAN is presented a real image of a lava lamp and also one of the fake lava lamp and then it learns to make the fake ones look as real as possible. 
 
-For a lava lamp, a sequence of images has to be created. This sequence should in fact be infinite since a lava lamp can run forever. Thus the GAN should learn to output an arbitrarily long sequence of lava lamp images as a video. This is achieved by using a recurrent neural network (RNN). The RNN gets the 64 element noise vector of time step *t* and outputs the 64 element noise vector for time stemp *t+1*. 
+For a lava lamp, a sequence of images has to be created. This sequence should in fact be infinite since a lava lamp can run forever. Thus the GAN should learn to output an arbitrarily long sequence of lava lamp images as a video. This is achieved by using a recurrent neural network (RNN). The RNN gets the 64 element noise vector of time step *t* and outputs the 64 element noise vector for time stamp *t+1*. 
 
 The tricky part is to make sure that the state of the lava lamp (the 64 element random noise vector) remains stable. It could for example happen that over time the distribution of noise in the vector diverges from a normal distribution and that the mean becomes 10 and the standard deviation 52. In this case, the output images of the lava lamps wouldn't be correct anymore as the GAN was trained to expect the input vector to be normally distributed. To solve this problem, I make sure that in training the output of the RNN stays normally distributed. This is accomplished by adding penalization terms in the training which discourage the noise to diverge from the normal distribution. 
 
-## Learning 
+## Training
 
 To learn a new model run
 
