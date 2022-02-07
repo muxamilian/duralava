@@ -52,14 +52,14 @@ An APNG named ```out.png``` will be created in the current directory. For creati
 I trained on a MacBook Air with an M1 SoC with 16 GB of shared memory for CPU and GPU. Thus, memory was the limiting factor in my experiments. 
 
 With more memory, one could 
-* Increase the resolution (currently 64x64 pixels)
-* Increase the training sequence length (currently 20)
-* Increase the batch size (currently 32)
-* Increase the size of the recurrent neural networks, which model the evolution of the lava lamp over time
+* Increase the **resolution** (currently 64x64 pixels)
+* Increase the training **sequence length** (currently 20)
+* Increase the **batch size** (currently 32)
+* Increase the **size of the recurrent neural networks**, which model the evolution of the lava lamp over time
 
 Other ideas:
-* Use duralava for simulating fireplaces (see [HN discussion](https://news.ycombinator.com/item?id=30234732)). This should be easier than a lava lamp. But more frames per second are needed since fireplaces change faster than lava lamps. 
-* Use duralava for simulating aquariums (probably a bit more difficult).
+* Use duralava for simulating **fireplaces** (see [HN discussion](https://news.ycombinator.com/item?id=30234732)). This should be easier than a lava lamp. But more frames per second are needed since fireplaces change faster than lava lamps. 
+* Use duralava for simulating **aquariums** (probably a bit more difficult).
 
 ## Dataset
 
