@@ -57,6 +57,10 @@ With more memory, one could
 * Increase the batch size (currently 32)
 * Increase the size of the recurrent neural networks, which model the evolution of the lava lamp over time
 
+Other ideas:
+* Use duralava for simulating fireplaces (see [HN discussion](https://news.ycombinator.com/item?id=30234732)). This should be easier than a lava lamp. But more frames per second are needed since fireplaces change faster than lava lamps. 
+* Use duralava for simulating aquariums (probably a bit more difficult).
+
 ## Dataset
 
 ```lavalamp.mov``` contains more than 1 hour of footage of a lava lamp at 30 fps and can be freely used for any purpose. In the ```frames``` directory there are the individual frames of the video scaled to 64x64 pixels, which I used for training the model. 
