@@ -28,7 +28,7 @@ batch_size = 32
 # How many frames to take from the dataset for training. By default, take all
 n_items = sys.maxsize
 epochs = 200
-# Dimension of the noise vector of the GAN
+# Dimension of the noise vector of the generator
 noise_dim = 64
 # Dimension of the internal state of the discriminator
 disc_dim = 128
@@ -36,17 +36,17 @@ disc_dim = 128
 disc_recurrent_dim = 128
 # How many examples to generate for visualization during training
 num_examples_to_generate = 16
-# The higher, the more the the training aims to produces a noise vector in the generator, which is shaped like a normal distribution
+# The higher, the more the training aims to produces a noise vector in the generator which is shaped like a normal distribution
 regularization_multiplier = 0.1
 # After every training sequence, the internal state of the generator is reset with this probability. 
-# A higher number makes training more stable (state alwaysa reset) but can lead to the generator making worse output, 
+# A higher number makes training more stable (state is more often reset) but can lead to the generator making worse output, 
 # thus not creating a credible lava lamp
 reset_probability = 0.5
 # FPS of the lava lamp training data
 original_lava_lamp_fps = 30
 # Letting the GAN learn of 30 FPS is too much. Thus only take every 6th frame (actual FPS is 5 then)
 every_nth = 6
-# Sequence length of the recurrent GAN. More is better but also more unstable. Higher seq_len needs more memory. 
+# Sequence length of the recurrent GAN. Higher is better but also more unstable. Higher seq_len needs more memory. 
 seq_len = 20
 # Output fps in 'live' or 'video' mode. If original_lava_lamp_fps==30 and every_nth==6 the actual FPS during training was 30/6==5.
 # If output_fps is more than the FPS of during training, missing frames are linearly interpolated. 
