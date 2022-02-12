@@ -60,6 +60,7 @@ With more memory, one could
 
 Other ideas:
 * Use duralava for simulating **fireplaces** (see [HN discussion](https://news.ycombinator.com/item?id=30234732)). This should be easier than a lava lamp. But more frames per second are needed since fireplaces change faster than lava lamps. 
+* Use duralava for simulating a **waterfall**.
 * Use duralava for simulating **aquariums** (probably a bit more difficult).
 
 ## Dataset
