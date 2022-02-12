@@ -1,0 +1,5 @@
+tensorflow>=2.7
+numpy
+Pillow
+tqdm
+opencv-python
