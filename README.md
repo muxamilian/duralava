@@ -66,3 +66,8 @@ Other ideas:
 ## Dataset
 
 ```lavalamp.mov``` contains more than 1 hour of footage of a lava lamp at 30 fps and can be freely used for any purpose. In the ```frames``` directory there are the individual frames of the video scaled to 64x64 pixels, which I used for training the model. 
+
+To create a folder with images from a video make sure you have ```ffmpeg``` installed and execute the following commands:
+
+    mkdir my_frames
+    ffmpeg -i lavalamp.mov -vf scale=64:64 -sws_flags area my_frames/image%07d.png -hide_banner
