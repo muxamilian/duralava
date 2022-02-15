@@ -41,7 +41,7 @@ regularization_multiplier = 0.1
 # After every training sequence, the internal state of the generator is reset with this probability. 
 # A higher number makes training more stable (state is more often reset) but can lead to the generator making worse output, 
 # thus not creating a credible lava lamp
-reset_probability = 0.25
+reset_probability = 0.5
 # FPS of the lava lamp training data
 original_lava_lamp_fps = 30
 # Letting the GAN learn of 30 FPS is too much. Thus only take every 6th frame (actual FPS is 5 then)
@@ -91,8 +91,6 @@ def make_generator_model():
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(512),
-      layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
     name="generator_recurrent"
@@ -124,8 +122,6 @@ def make_discriminator_model():
   recurrent_disc = tf.keras.Sequential(
     [
       layers.Input(shape=(disc_dim+disc_recurrent_dim,)),
-      layers.Dense(512),
-      layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(512),
