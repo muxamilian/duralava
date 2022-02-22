@@ -23,8 +23,9 @@ For training, the GAN is presented a real image of a lava lamp and also one of t
 
 For a lava lamp, a sequence of images has to be created. This sequence should in fact be infinite since a lava lamp can run forever. Thus the GAN should learn to output an arbitrarily long sequence of lava lamp images as a video. This is achieved by using a recurrent neural network (RNN). The RNN gets the 64 element noise vector of time step *t* and outputs the 64 element noise vector for time stamp *t+1*. 
 
-The tricky part is to make sure that the state of the lava lamp (the 64 element random noise vector) remains stable. It could for example happen that over time the distribution of noise in the vector diverges from a normal distribution and that the mean becomes 10 and the standard deviation 52. In this case, the output images of the lava lamps wouldn't be correct anymore as the GAN was trained to expect the input vector to be normally distributed. To solve this problem, I make sure that in training the output of the RNN stays normally distributed. This is accomplished by adding penalization terms in the training which discourage the noise to diverge from the normal distribution. Also, the 64 element noise vector is normalized to standard deviation 1 and mean 0 after every step. 
+The tricky part is to make sure that the state of the lava lamp (the 64 element random noise vector) remains stable. It could for example happen that over time the distribution of noise in the vector diverges from a normal distribution and that the mean becomes 10 and the standard deviation 52. In this case, the output images of the lava lamps wouldn't be correct anymore as the GAN was trained to expect the input vector to be normally distributed. To solve this problem, I make sure that in training the output of the RNN stays normally distributed. This is accomplished by adding penalization terms in the training which discourage the noise to diverge from the normal distribution. 
 
+<!-- Also, the 64 element noise vector is normalized to standard deviation 1 and mean 0 after every step. -->
 ## Training
 
 To learn a new model run
@@ -37,13 +38,13 @@ Around 10 GB of combined CPU and GPU memory are required. I used python 3.9.7 an
 
 To generate an output video live use some of the trained weights like this: 
 
-    python learn.py --weights logs/20220104-213105/weights.180 --mode live
+    python learn.py --weights weights/weights.110 --mode live
     
 ## Generating an output video
 
 To generate an output video as an APNG animation file use some of the trained weights like this: 
 
-    python learn.py --weights logs/20220104-213105/weights.180 --mode video
+    python learn.py --weights weights/weights.110 --mode video
     
 An APNG named ```out.png``` will be created in the current directory. For creating APNGs from a trained neural network, you need to have ```ffmpeg``` installed.  
 
