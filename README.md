@@ -72,3 +72,9 @@ To create a folder with images from a video make sure you have ```ffmpeg``` inst
 
     mkdir my_frames
     ffmpeg -i lavalamp.mov -vf scale=64:64 -sws_flags area my_frames/image%07d.png -hide_banner
+
+## Citation
+
+If you wish to cite this research you can do it like this: 
+
+[*"Duralava: Lava lamp simulated by neural net in infinite loop", Maximilian Bachl, 2022*](https://scholar.google.com/citations?view_op=view_citation&hl=en&user=llysaaMAAAAJ&citation_for_view=llysaaMAAAAJ:5nxA0vEk-isC)
