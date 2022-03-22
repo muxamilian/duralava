@@ -1,4 +1,6 @@
 *.mov filter=lfs diff=lfs merge=lfs -text
 *.py linguist-detectable=true
-frames linguist-detectable=false
-logs linguist-detectable=false
+frames/* linguist-detectable=false
+frames/**/* linguist-detectable=false
+logs/* linguist-detectable=false
+logs/**/* linguist-detectable=false
