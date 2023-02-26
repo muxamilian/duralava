@@ -13,31 +13,37 @@ from PIL import Image
 import subprocess
 import cv2
 import time
+import scipy.stats
+
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+if physical_devices:
+    for gpu in physical_devices:
+        tf.config.experimental.set_memory_growth(gpu, True)
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
-parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
+parser.add_argument('--data_dir', type=str, default='fire_frames', help='Directory with training data.')
 parser.add_argument('--weights', type=str, default='', help='Path to weights, for example "logs/20220104-213105/weights.160".')
 parser.add_argument('--mode', type=str, default='train', help='Can be "train", "live" or "video".')
 
 args = parser.parse_args()
 
 # Initial learning rate
-lr = 1e-3
+lr = 5e-4
 img_size = 64
 batch_size = 32
 # How many frames to take from the dataset for training. By default, take all
 n_items = sys.maxsize
-epochs = 200
+epochs = 500
 # Dimension of the noise vector of the generator
-noise_dim = 64
+noise_dim = 128
 # Dimension of the internal state of the discriminator
-disc_dim = 128
+disc_dim = 256
 # Dimension of the internal state of the recurrent part of the discriminator
-disc_recurrent_dim = 128
+disc_recurrent_dim = 384
 # How many examples to generate for visualization during training
 num_examples_to_generate = 16
 # The higher, the more the training aims to produces a noise vector in the generator which is shaped like a normal distribution
-regularization_multiplier = 0.1
+regularization_multiplier = 1.
 # After every training sequence, the internal state of the generator is reset with this probability. 
 # A higher number makes training more stable (state is more often reset) but can lead to the generator making worse output, 
 # thus not creating a credible lava lamp
@@ -45,14 +51,15 @@ reset_probability = 0.5
 # FPS of the lava lamp training data
 original_lava_lamp_fps = 30
 # Letting the GAN learn of 30 FPS is too much. Thus only take every 6th frame (actual FPS is 5 then)
-every_nth = 6
+every_nth = 1
 # Sequence length of the recurrent GAN. Higher is better but also more unstable. Higher seq_len needs more memory. 
-seq_len = 20
+seq_len = 30
 # Output fps in 'live' or 'video' mode. If original_lava_lamp_fps==30 and every_nth==6 the actual FPS during training was 30/6==5.
 # If output_fps is more than the FPS of during training, missing frames are linearly interpolated. 
-output_fps = 20
+output_fps = 30
 # Length of the output video/apng to generate in seconds
-evaluation_duration = 30
+evaluation_duration = 10
+width_multiplier = 2
 
 def process_img(file_path, img_size):
   img = tf.io.read_file(file_path)
@@ -67,16 +74,16 @@ def make_generator_model():
     [
       tf.keras.Input(shape=(noise_dim,)),
       layers.Reshape ((1, 1, noise_dim)),
-      layers.Conv2DTranspose(256, kernel_size=4, strides=4, padding='same', use_bias=False),
+      layers.Conv2DTranspose(width_multiplier*256, kernel_size=4, strides=4, padding='same', use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2DTranspose(128, kernel_size=4, strides=2, padding='same', use_bias=False),
+      layers.Conv2DTranspose(width_multiplier*128, kernel_size=4, strides=2, padding='same', use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2DTranspose(64, kernel_size=4, strides=2, padding='same', use_bias=False),
+      layers.Conv2DTranspose(width_multiplier*64, kernel_size=4, strides=2, padding='same', use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2DTranspose(32, kernel_size=4, strides=2, padding='same', use_bias=False),
+      layers.Conv2DTranspose(width_multiplier*32, kernel_size=4, strides=2, padding='same', use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
       layers.Conv2DTranspose(3, kernel_size=4, strides=2, activation='sigmoid', padding='same')
@@ -87,9 +94,9 @@ def make_generator_model():
   recurrent_gen = tf.keras.Sequential(
     [
       layers.Input(shape=(noise_dim,)),
-      layers.Dense(512),
+      layers.Dense(768),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(512),
+      layers.Dense(768),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
@@ -102,15 +109,15 @@ def make_discriminator_model():
   disc = tf.keras.Sequential(
     [
       layers.Input(shape=(img_size, img_size, 3)),
-      layers.Conv2D(32, (4, 4), padding='same', strides=2),
+      layers.Conv2D(width_multiplier*32, (4, 4), padding='same', strides=2),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2D(64, (4, 4), padding='same', strides=2, use_bias=False),
+      layers.Conv2D(width_multiplier*64, (4, 4), padding='same', strides=2, use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2D(128, (4, 4), padding='same', strides=2, use_bias=False),
+      layers.Conv2D(width_multiplier*128, (4, 4), padding='same', strides=2, use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
-      layers.Conv2D(256, (4, 4), padding='same', strides=2, use_bias=False),
+      layers.Conv2D(width_multiplier*256, (4, 4), padding='same', strides=2, use_bias=False),
       layers.BatchNormalization(),
       layers.LeakyReLU(alpha=0.2),
       layers.Conv2D(disc_dim, (4, 4), padding='same', strides=4),
@@ -122,9 +129,9 @@ def make_discriminator_model():
   recurrent_disc = tf.keras.Sequential(
     [
       layers.Input(shape=(disc_dim+disc_recurrent_dim,)),
-      layers.Dense(512),
+      layers.Dense(768),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(512),
+      layers.Dense(768),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(disc_recurrent_dim),
     ],
@@ -134,7 +141,7 @@ def make_discriminator_model():
   end_disc = tf.keras.Sequential(
     [
       layers.Input(shape=(disc_recurrent_dim,)),
-      layers.Dense(512),
+      layers.Dense(768),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(1, activation=None)
     ],
@@ -158,7 +165,8 @@ class CustomModel(tf.keras.Model):
   def __init__(self):
     super(CustomModel, self).__init__()
 
-    self.seed = tf.random.normal([num_examples_to_generate, noise_dim])
+    self.seed = tf.random.normal([batch_size, noise_dim])
+    self.quantiles = tf.constant([scipy.stats.norm.ppf(item) for item in tf.cast(tf.linspace(0, 1, batch_size*noise_dim+2)[1:-1], tf.float32).numpy().tolist()], dtype=tf.float32)
 
     self.gen_loss_tracker = tf.keras.metrics.Mean(name="gen_loss")
     self.disc_loss_tracker = tf.keras.metrics.Mean(name="disc_loss")
@@ -205,20 +213,33 @@ class CustomModel(tf.keras.Model):
     return out_images
 
   @tf.function
-  def inference(self):
+  def inference(self, during_training=False):
     noise = self.seed
     
     all_noises = []
+    if during_training:
+      all_disc_outputs = []
+      prev_fake_output = tf.zeros((batch_size, disc_recurrent_dim))
     all_generated_images = []
     for _ in range(seq_len):
+      all_noises.append(noise)
       generated_images = self.generator(noise, training=False)
+
+      if during_training:
+        fake_first_output = tf.reshape(self.discriminator(generated_images, training=False), (batch_size, disc_dim))
+        concat_fake = tf.concat((fake_first_output, prev_fake_output), axis=-1)
+        prev_fake_output = self.recurrent_discriminator(concat_fake, training=False)
+        all_disc_outputs.append(prev_fake_output)
+
       all_generated_images.append(generated_images)
       noise = self.recurrent_generator(noise, training=False)
       gen_mean = tf.reduce_mean(noise)
       gen_std = tf.math.reduce_std(noise)
       noise = (noise - gen_mean)/gen_std
-      all_noises.append(noise)
-    return all_generated_images, all_noises
+    if during_training:
+      return all_generated_images, all_noises, all_disc_outputs
+    else:
+      return all_generated_images, all_noises
 
   @tf.function
   def train_step(self, images):
@@ -247,11 +268,14 @@ class CustomModel(tf.keras.Model):
         gen_skews.append(gen_skew)
         gen_kurt = tf.reduce_mean((current_noise - gen_mean)**4)/gen_std**4
         gen_kurts.append(gen_kurt)
-        gen_regularization_loss = \
-            gen_mean**2 + \
-            (gen_std - 1)**2 + \
-            gen_skew**2 + \
-            (gen_kurt - 3)**2
+        # gen_regularization_loss = \
+        #     gen_mean**2 + \
+        #     (gen_std - 1)**2 + \
+        #     gen_skew**2 + \
+        #     (gen_kurt - 3)**2
+        reshaped_noise = tf.reshape(current_noise, (-1,))
+        sorted_noise = tf.sort(reshaped_noise)
+        gen_regularization_loss = tf.reduce_mean((sorted_noise-self.quantiles)**2.)
         gen_regularization_losses.append(gen_regularization_loss)
         current_noise = (current_noise - gen_mean)/gen_std
 
@@ -338,22 +362,27 @@ class CustomCallback(tf.keras.callbacks.Callback):
     self.model.gen_kurt_tracker.reset_states()
 
   def on_epoch_end(self, epoch, logs=None):
-    all_generated_images, all_noises = self.model.inference()
+    all_generated_images, all_noises, all_disc_outputs = self.model.inference(during_training=True)
 
     first = all_generated_images[0]
     first_noise = all_noises[0]     
+    first_disc_output = all_disc_outputs[0]     
 
     second = all_generated_images[1]
     second_noise = all_noises[1]          
+    second_disc_output = all_disc_outputs[1]          
 
     third = all_generated_images[2]
     third_noise = all_noises[2]          
+    third_disc_output = all_disc_outputs[2]          
 
     middle = all_generated_images[int(len(all_generated_images)/2)]
     middle_noise = all_noises[int(len(all_noises)/2)]          
+    middle_disc_output = all_disc_outputs[int(len(all_noises)/2)]          
 
     end = all_generated_images[-1]
     end_noise = all_noises[-1]          
+    end_disc_output = all_disc_outputs[-1]          
 
     with file_writer.as_default():
       tf.summary.image("Out imgs first", first, step=epoch, max_outputs=num_examples_to_generate)
@@ -367,6 +396,12 @@ class CustomCallback(tf.keras.callbacks.Callback):
       tf.summary.histogram("Out noise third", tf.reshape(third_noise, (-1,)), step=epoch)
       tf.summary.histogram("Out noise middle", tf.reshape(middle_noise, (-1,)), step=epoch)
       tf.summary.histogram("Out noise end", tf.reshape(end_noise, (-1,)), step=epoch)
+
+      tf.summary.histogram("Out disc_output first", tf.reshape(first_disc_output, (-1,)), step=epoch)
+      tf.summary.histogram("Out disc_output second", tf.reshape(second_disc_output, (-1,)), step=epoch)
+      tf.summary.histogram("Out disc_output third", tf.reshape(third_disc_output, (-1,)), step=epoch)
+      tf.summary.histogram("Out disc_output middle", tf.reshape(middle_disc_output, (-1,)), step=epoch)
+      tf.summary.histogram("Out disc_output end", tf.reshape(end_disc_output, (-1,)), step=epoch)
 
       for key in logs:
         tf.summary.scalar(key, logs[key], step=epoch)
@@ -391,7 +426,8 @@ if args.mode == 'train':
     with open(cache_file_name, 'wb') as f:
       pickle.dump(all_images, f)
 
-  batches_per_epoch = int((len(x_files)-every_nth*seq_len)/(batch_size*seq_len))
+  # batches_per_epoch = int((len(x_files)-every_nth*seq_len)/(batch_size*seq_len))
+  batches_per_epoch = int((len(x_files)-seq_len)/batch_size)
 
   logdir = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
   file_writer = tf.summary.create_file_writer(logdir)
@@ -413,7 +449,8 @@ elif args.mode == 'live' or args.mode == 'video':
   frame = None
   last_frame = None
   if args.mode == 'video':
-    p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {output_fps} -i - -f apng -plays 0 -r {output_fps} out.png'.split(' '), stdin=subprocess.PIPE)
+    p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {output_fps} -i - -f apng -plays 0 -r {output_fps} {args.weights.split("/")[-1]}.png'.split(' '), stdin=subprocess.PIPE)
+    # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {output_fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -crf 1 -r {output_fps} {args.weights.split("/")[-1]}.mp4'.split(' '), stdin=subprocess.PIPE)
     # p = subprocess.Popen(f'ffmpeg -y -f image2pipe -vcodec png -r {fps} -i - -f mp4 -vcodec libx264 -plays 0 -pix_fmt yuv420p -r {fps} -crf 1 out.mp4'.split(' '), stdin=subprocess.PIPE)
   elif args.mode == 'live':
     evaluation_duration = 1000000
