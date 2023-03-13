@@ -14,6 +14,7 @@ import subprocess
 import cv2
 import time
 import scipy.stats
+import shutil
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 if physical_devices:
@@ -21,45 +22,50 @@ if physical_devices:
         tf.config.experimental.set_memory_growth(gpu, True)
 
 parser = argparse.ArgumentParser(description="Either train a model, evaluate an existing one on a dataset or run live.")
-parser.add_argument('--data_dir', type=str, default='fire_frames', help='Directory with training data.')
+parser.add_argument('--data_dir', type=str, default='frames', help='Directory with training data.')
 parser.add_argument('--weights', type=str, default='', help='Path to weights, for example "logs/20220104-213105/weights.160".')
 parser.add_argument('--mode', type=str, default='train', help='Can be "train", "live" or "video".')
 
 args = parser.parse_args()
 
+#erf^(-1)(tanh(x/2))
+
+NORMALIZE = True
+
 # Initial learning rate
-lr = 5e-4
+lr = 1e-3
 img_size = 64
 batch_size = 32
 # How many frames to take from the dataset for training. By default, take all
 n_items = sys.maxsize
-epochs = 500
+epochs = 40
 # Dimension of the noise vector of the generator
-noise_dim = 128
+noise_dim = 64
 # Dimension of the internal state of the discriminator
-disc_dim = 256
+disc_dim = 128
 # Dimension of the internal state of the recurrent part of the discriminator
-disc_recurrent_dim = 384
+disc_recurrent_dim = 256
 # How many examples to generate for visualization during training
 num_examples_to_generate = 16
-# The higher, the more the training aims to produces a noise vector in the generator which is shaped like a normal distribution
-regularization_multiplier = 1.
 # After every training sequence, the internal state of the generator is reset with this probability. 
 # A higher number makes training more stable (state is more often reset) but can lead to the generator making worse output, 
 # thus not creating a credible lava lamp
-reset_probability = 0.5
+reset_probability = 1./40
 # FPS of the lava lamp training data
 original_lava_lamp_fps = 30
 # Letting the GAN learn of 30 FPS is too much. Thus only take every 6th frame (actual FPS is 5 then)
-every_nth = 1
+every_nth = 6
 # Sequence length of the recurrent GAN. Higher is better but also more unstable. Higher seq_len needs more memory. 
-seq_len = 30
+seq_len = 40
 # Output fps in 'live' or 'video' mode. If original_lava_lamp_fps==30 and every_nth==6 the actual FPS during training was 30/6==5.
 # If output_fps is more than the FPS of during training, missing frames are linearly interpolated. 
-output_fps = 30
+output_fps = 20
 # Length of the output video/apng to generate in seconds
-evaluation_duration = 10
-width_multiplier = 2
+evaluation_duration = 30
+# The higher, the more the training aims to produces a noise vector in the generator which is shaped like a normal distribution
+regularization_multiplier = 0.1
+
+width_multiplier = 1
 
 def process_img(file_path, img_size):
   img = tf.io.read_file(file_path)
@@ -94,9 +100,9 @@ def make_generator_model():
   recurrent_gen = tf.keras.Sequential(
     [
       layers.Input(shape=(noise_dim,)),
-      layers.Dense(768),
+      layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(768),
+      layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(noise_dim)
     ],
@@ -129,9 +135,9 @@ def make_discriminator_model():
   recurrent_disc = tf.keras.Sequential(
     [
       layers.Input(shape=(disc_dim+disc_recurrent_dim,)),
-      layers.Dense(768),
+      layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
-      layers.Dense(768),
+      layers.Dense(512),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(disc_recurrent_dim),
     ],
@@ -141,7 +147,7 @@ def make_discriminator_model():
   end_disc = tf.keras.Sequential(
     [
       layers.Input(shape=(disc_recurrent_dim,)),
-      layers.Dense(768),
+      layers.Dense(256),
       layers.LeakyReLU(alpha=0.2),
       layers.Dense(1, activation=None)
     ],
@@ -150,23 +156,14 @@ def make_discriminator_model():
 
   return disc, recurrent_disc, end_disc
 
-def data_generator():
-  while True:
-    indices = list(range(len(all_images)-every_nth*seq_len))
-    random.shuffle(indices)
-
-    for i in range(batches_per_epoch):
-      current_batch_indices = indices[i*batch_size:(i+1)*batch_size]
-      batch = [[all_images[index+every_nth*j] for index in current_batch_indices] for j in range(seq_len)]
-      yield (batch,)
-
 class CustomModel(tf.keras.Model):
 
   def __init__(self):
     super(CustomModel, self).__init__()
 
     self.seed = tf.random.normal([batch_size, noise_dim])
-    self.quantiles = tf.constant([scipy.stats.norm.ppf(item) for item in tf.cast(tf.linspace(0, 1, batch_size*noise_dim+2)[1:-1], tf.float32).numpy().tolist()], dtype=tf.float32)
+    # self.quantiles = tf.constant([scipy.stats.norm.ppf(item) for item in tf.cast(tf.linspace(0, 1, batch_size*noise_dim+2)[1:-1], tf.float32).numpy().tolist()], dtype=tf.float32)
+    self.quantiles = tf.constant([scipy.stats.norm.ppf(item) for item in tf.cast(tf.linspace(0, 1, int((batch_size+batch_size*(seq_len-1)*reset_probability)*noise_dim+2))[1:-1], tf.float32).numpy().tolist()], dtype=tf.float32)
 
     self.gen_loss_tracker = tf.keras.metrics.Mean(name="gen_loss")
     self.disc_loss_tracker = tf.keras.metrics.Mean(name="disc_loss")
@@ -176,8 +173,10 @@ class CustomModel(tf.keras.Model):
     self.gen_skew_tracker = tf.keras.metrics.Mean(name="gen_skew")
     self.gen_kurt_tracker = tf.keras.metrics.Mean(name="gen_kurt")
 
-    self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.NONE)
     self.noise = tf.Variable(tf.random.normal([batch_size, noise_dim]))
+    self.prev_real_output_var = tf.Variable(tf.zeros((batch_size, disc_recurrent_dim)))
+    self.prev_fake_output_var = tf.Variable(tf.zeros((batch_size, disc_recurrent_dim)))
 
     self.generator, self.recurrent_generator = make_generator_model()
     self.generator.summary()
@@ -192,11 +191,14 @@ class CustomModel(tf.keras.Model):
       real_loss = self.cross_entropy(tf.ones_like(real_output), real_output)
       fake_loss = self.cross_entropy(tf.zeros_like(fake_output), fake_output)
       total_loss = real_loss + fake_loss
+      assert len(total_loss.shape) == 1
       return total_loss
 
   @tf.function
   def generator_loss(self, fake_output):
-      return self.cross_entropy(tf.ones_like(fake_output), fake_output)
+      loss = self.cross_entropy(tf.ones_like(fake_output), fake_output)
+      assert len(loss.shape) == 1
+      return loss
 
   @tf.function
   def call(self, _, training=False):
@@ -222,7 +224,6 @@ class CustomModel(tf.keras.Model):
       prev_fake_output = tf.zeros((batch_size, disc_recurrent_dim))
     all_generated_images = []
     for _ in range(seq_len):
-      all_noises.append(noise)
       generated_images = self.generator(noise, training=False)
 
       if during_training:
@@ -233,9 +234,11 @@ class CustomModel(tf.keras.Model):
 
       all_generated_images.append(generated_images)
       noise = self.recurrent_generator(noise, training=False)
+      all_noises.append(noise)
       gen_mean = tf.reduce_mean(noise)
       gen_std = tf.math.reduce_std(noise)
-      noise = (noise - gen_mean)/gen_std
+      if NORMALIZE:
+        noise = (noise - gen_mean)/gen_std
     if during_training:
       return all_generated_images, all_noises, all_disc_outputs
     else:
@@ -244,11 +247,13 @@ class CustomModel(tf.keras.Model):
   @tf.function
   def train_step(self, images):
     images = self.transform_images(images[0])
-    current_noise = self.noise
+    assert images.shape[0] == seq_len
+    assert images.shape[1] == batch_size
 
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-      prev_real_output  = tf.zeros((batch_size, disc_recurrent_dim))
-      prev_fake_output = tf.zeros((batch_size, disc_recurrent_dim))
+      current_noise = self.noise
+      prev_real_output = self.prev_real_output_var
+      prev_fake_output = self.prev_fake_output_var
       gen_losses = []
       gen_regularization_losses = []
       gen_means = []
@@ -256,6 +261,7 @@ class CustomModel(tf.keras.Model):
       gen_skews = []
       gen_kurts = []
       disc_losses = []
+      # num_taken = 0
 
       for i in range(seq_len):
         generated_images = self.generator(current_noise, training=True)
@@ -273,11 +279,23 @@ class CustomModel(tf.keras.Model):
         #     (gen_std - 1)**2 + \
         #     gen_skew**2 + \
         #     (gen_kurt - 3)**2
-        reshaped_noise = tf.reshape(current_noise, (-1,))
-        sorted_noise = tf.sort(reshaped_noise)
-        gen_regularization_loss = tf.reduce_mean((sorted_noise-self.quantiles)**2.)
-        gen_regularization_losses.append(gen_regularization_loss)
-        current_noise = (current_noise - gen_mean)/gen_std
+        # reshaped_noise = tf.reshape(current_noise, (-1,))
+        # sorted_noise = tf.sort(reshaped_noise)
+        # gen_regularization_losses.append(tf.reduce_mean((sorted_noise-self.quantiles)**2.))
+
+        # reset = tf.reshape(tf.cast(tf.random.uniform((batch_size,)) <= reset_probability, tf.float32), (-1, 1))
+        # reset = tf.reshape(tf.random.shuffle(tf.concat([tf.ones(int(batch_size*reset_probability), dtype=tf.float32), tf.zeros(batch_size-int(batch_size*reset_probability), dtype=tf.float32)], axis=0)), (-1, 1))
+        reset = tf.reshape(tf.random.shuffle(tf.concat([tf.ones(int(batch_size*reset_probability), dtype=tf.float32), tf.zeros(batch_size-int(batch_size*reset_probability), dtype=tf.float32)], axis=0)), (-1, 1))
+        if i == seq_len - 1:
+          losses_to_take = tf.cast(tf.ones((batch_size, 1), dtype=tf.float32), dtype=tf.bool)
+        else:
+          losses_to_take = tf.cast(reset, dtype=tf.bool)
+        # num_taken += tf.reduce_sum(losses_to_take)
+
+        gen_regularization_losses.append(current_noise[tf.tile(losses_to_take, tf.constant((1, noise_dim)))])
+
+        if NORMALIZE:
+          current_noise = (current_noise - gen_mean)/gen_std
 
         real_first_output = tf.reshape(self.discriminator(images[i,...], training=True), (batch_size, disc_dim))
         concat_real = tf.concat((real_first_output, prev_real_output), axis=-1)
@@ -289,13 +307,26 @@ class CustomModel(tf.keras.Model):
         prev_fake_output = self.recurrent_discriminator(concat_fake, training=True)
         fake_output = self.end_discriminator(prev_fake_output, training=True)
 
-        gen_losses.append(self.generator_loss(fake_output))
-        disc_losses.append(self.discriminator_loss(real_output, fake_output))
+        gen_loss = self.generator_loss(fake_output)
+        gen_losses.append(gen_loss[tf.squeeze(losses_to_take)])
+        disc_loss = self.discriminator_loss(real_output, fake_output)
+        disc_losses.append(disc_loss[tf.squeeze(losses_to_take)])
 
-      gen_loss = tf.reduce_mean(tf.stack(gen_losses))
-      gen_regularization_loss = tf.reduce_mean(tf.stack(gen_regularization_losses))
+        new_noise = tf.random.normal([batch_size, noise_dim])
+        current_noise = (1-reset)*current_noise + reset*new_noise
+        prev_real_output = (1-reset)*prev_real_output + reset*0.
+        prev_fake_output = (1-reset)*prev_fake_output + reset*0.
 
-      disc_loss = tf.reduce_mean(tf.stack(disc_losses))
+      concated_gen_losses = tf.concat(gen_losses, axis=0)
+      assert len(concated_gen_losses.shape) == 1
+      gen_loss = tf.reduce_mean(concated_gen_losses)
+      sorted_noise = tf.sort(((tf.concat(gen_regularization_losses, axis=0))))
+
+      gen_regularization_loss = tf.reduce_mean((sorted_noise-self.quantiles)**2.)
+
+      concated_disc_losses = tf.concat(disc_loss, axis=0)
+      assert len(concated_disc_losses.shape) == 1
+      disc_loss = tf.reduce_mean(concated_disc_losses)
 
       gradients_of_generator = gen_tape.gradient(gen_loss + regularization_multiplier*gen_regularization_loss, 
         self.generator.trainable_variables + 
@@ -312,25 +343,29 @@ class CustomModel(tf.keras.Model):
         self.recurrent_discriminator.trainable_variables + 
         self.end_discriminator.trainable_variables))
 
-      self.gen_loss_tracker.update_state(gen_loss)
-      self.disc_loss_tracker.update_state(disc_loss)
-      self.gen_regularization_loss_tracker.update_state(gen_regularization_loss)
-      self.gen_mean_tracker.update_state(tf.reduce_mean(tf.stack(gen_mean)))
-      self.gen_std_tracker.update_state(tf.reduce_mean(tf.stack(gen_std)))
-      self.gen_skew_tracker.update_state(tf.reduce_mean(tf.stack(gen_skew)))
-      self.gen_kurt_tracker.update_state(tf.reduce_mean(tf.stack(gen_kurt)))
+    self.gen_loss_tracker.update_state(gen_loss)
+    self.disc_loss_tracker.update_state(disc_loss)
+    self.gen_regularization_loss_tracker.update_state(gen_regularization_loss)
+    self.gen_mean_tracker.update_state(tf.reduce_mean(tf.stack(gen_mean)))
+    self.gen_std_tracker.update_state(tf.reduce_mean(tf.stack(gen_std)))
+    self.gen_skew_tracker.update_state(tf.reduce_mean(tf.stack(gen_skew)))
+    self.gen_kurt_tracker.update_state(tf.reduce_mean(tf.stack(gen_kurt)))
 
-      reset = tf.reshape(tf.cast(tf.random.uniform((batch_size,)) <= reset_probability, tf.float32), (-1, 1))
-      new_noise = tf.random.normal([batch_size, noise_dim])
-      self.noise.assign((1-reset)*current_noise + reset*new_noise)
+    # reset = tf.reshape(tf.cast(tf.random.uniform((batch_size,)) <= reset_probability, tf.float32), (-1, 1))
+    # reset = tf.reshape(tf.random.shuffle(tf.concat([tf.ones(int(batch_size*reset_probability), dtype=tf.float32), tf.zeros(batch_size-int(batch_size*reset_probability), dtype=tf.float32)], axis=0)), (-1, 1))
+    # new_noise = tf.random.normal([batch_size, noise_dim])
+    # self.noise.assign((1-reset)*current_noise + reset*new_noise)
+    self.noise.assign(current_noise)
+    self.prev_real_output_var.assign(tf.zeros((batch_size, disc_recurrent_dim)))
+    self.prev_fake_output_var.assign(tf.zeros((batch_size, disc_recurrent_dim)))
 
-      return {
-        "gen_loss": self.gen_loss_tracker.result(), "disc_loss": self.disc_loss_tracker.result(),
-        "gen_regularization_loss": self.gen_regularization_loss_tracker.result(),
-        "gen_mean": self.gen_mean_tracker.result(),
-        "gen_std": self.gen_std_tracker.result(),
-        "gen_skew": self.gen_skew_tracker.result(),
-        "gen_kurt": self.gen_kurt_tracker.result()}
+    return {
+      "gen_loss": self.gen_loss_tracker.result(), "disc_loss": self.disc_loss_tracker.result(),
+      "gen_regularization_loss": self.gen_regularization_loss_tracker.result(),
+      "gen_mean": self.gen_mean_tracker.result(),
+      "gen_std": self.gen_std_tracker.result(),
+      "gen_skew": self.gen_skew_tracker.result(),
+      "gen_kurt": self.gen_kurt_tracker.result()}
 
 class CustomCallback(tf.keras.callbacks.Callback):
 
@@ -407,7 +442,7 @@ class CustomCallback(tf.keras.callbacks.Callback):
         tf.summary.scalar(key, logs[key], step=epoch)
 
 model = CustomModel()
-model.compile()#, run_eagerly=True)
+model.compile()#run_eagerly=True)
 if args.weights != '':
   
   print("Loading weights from", args.weights)
@@ -427,16 +462,29 @@ if args.mode == 'train':
       pickle.dump(all_images, f)
 
   # batches_per_epoch = int((len(x_files)-every_nth*seq_len)/(batch_size*seq_len))
-  batches_per_epoch = int((len(x_files)-seq_len)/batch_size)
+  batches_per_epoch = int((len(all_images)-every_nth*seq_len)/batch_size)
+
+  def data_generator():
+    while True:
+      indices = list(range(len(all_images)-every_nth*seq_len))
+      random.shuffle(indices)
+
+      for i in range(batches_per_epoch):
+        current_batch_indices = indices[i*batch_size:(i+1)*batch_size]
+        batch = [[all_images[index+every_nth*j] for index in current_batch_indices] for j in range(seq_len)]
+        yield (batch,)
 
   logdir = "logs/" + datetime.now().strftime("%Y%m%d-%H%M%S")
+  os.makedirs(logdir, exist_ok=True)
+  shutil.copyfile(__file__, logdir + '/' + os.path.basename(__file__))
+
   file_writer = tf.summary.create_file_writer(logdir)
   model.fit(x=data_generator(),
             epochs=epochs,
             callbacks=[
               CustomCallback(), 
               tf.keras.callbacks.ModelCheckpoint(
-                os.path.join(logdir, "weights.{epoch:02d}"), verbose=1, save_weights_only=True, save_freq=10*batches_per_epoch)
+                os.path.join(logdir, "weights.{epoch:02d}"), verbose=1, save_weights_only=True, save_freq=1*batches_per_epoch)
             ],
             shuffle=False,
             steps_per_epoch=batches_per_epoch)
@@ -460,7 +508,8 @@ elif args.mode == 'live' or args.mode == 'video':
     frame, noise = model.generate(noise)
     gen_mean = tf.reduce_mean(noise)
     gen_std = tf.math.reduce_std(noise)
-    noise = (noise - gen_mean)/gen_std
+    if NORMALIZE:
+      noise = (noise - gen_mean)/gen_std
     frame = tf.image.convert_image_dtype(frame[0,...], tf.uint8)
     frame = frame.numpy().squeeze()
     if i > 0:
