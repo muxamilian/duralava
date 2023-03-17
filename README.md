@@ -61,6 +61,11 @@ With more memory, one could
 
 Other ideas:
 * Use duralava for simulating **fireplaces** (see [HN discussion](https://news.ycombinator.com/item?id=30234732)). This should be easier than a lava lamp. But more frames per second are needed since fireplaces change faster than lava lamps. 
+
+    ![weights 340, duralava neural network deep learning fireplace sample 1](https://user-images.githubusercontent.com/1943719/225874678-05d3cd52-02ff-46a7-a12c-fad31179fe63.png)![weights 350, duralava neural network deep learning fireplace sample 2](https://user-images.githubusercontent.com/1943719/225876142-db396055-4a58-4b29-a443-54fb531d2566.png)![weights 320, duralava neural network deep learning fireplace sample 3](https://user-images.githubusercontent.com/1943719/225877091-daca4054-b5da-4cae-8c00-9f4ce0f12e3d.png)
+
+
+
 * Use duralava for simulating a **waterfall**.
 * Use duralava for simulating **aquariums** (probably a bit more difficult).
 
